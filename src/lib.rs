@@ -1,15 +1,21 @@
+use good_lp::Solution as LpSolution;
 use good_lp::solvers::coin_cbc::coin_cbc;
 use good_lp::{
-    Expression, ProblemVariables, Solution, SolverModel, Variable, constraint, variable, variables,
+    Expression, ProblemVariables, SolverModel, Variable, constraint, variable, variables,
 };
-use std::{collections::BTreeMap, fs::read_to_string};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
-pub struct Input {
+pub struct Problem {
     pub workloads: BTreeMap<String, WorkloadSpec>,
     pub clusters: BTreeMap<String, u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Solution {
+    pub solution: BTreeMap<String, BTreeMap<String, u32>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,11 +38,6 @@ pub struct Affinity {
 pub struct AntiAffinity {
     pub soft: Option<Vec<SoftRequirement>>,
     pub hard: Option<HardRequirement>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Output {
-    pub solution: BTreeMap<String, BTreeMap<String, u32>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -69,7 +70,7 @@ pub struct HardRequirement {
 // non-linear operations, so we must reformulate them using auxiliary variables and linear
 // relationships like we've done here.
 
-pub fn solve(input: Input) -> Result<Output, Box<dyn std::error::Error>> {
+pub fn solve(input: Problem) -> Result<Solution, Box<dyn std::error::Error>> {
     let workloads = &input.workloads;
     let clusters = &input.clusters;
     let init_zero = Expression::from(0.0);
@@ -236,7 +237,7 @@ pub fn solve(input: Input) -> Result<Output, Box<dyn std::error::Error>> {
         })
         .collect();
 
-    Ok(Output {
+    Ok(Solution {
         solution: solution_map,
     })
 }
@@ -323,7 +324,7 @@ mod tests {
         // Parse the input part
         let failure_message = format!("Failed to parse input YAML: {}", test_file.display());
         let input_yaml = parts.first().expect("No input found in test file").trim();
-        let input: Input = serde_yaml::from_str(input_yaml).expect(&failure_message);
+        let input: Problem = serde_yaml::from_str(input_yaml).expect(&failure_message);
 
         let failure_message = format!("Failed to parse expected YAML: {}", test_file.display());
         let expected_yaml = format!("solution:{}", parts.get(1).expect(&failure_message));
@@ -335,7 +336,7 @@ mod tests {
 
         // Compare the output (normalizing by parsing and re-serializing the expected)
         let failure_message = format!("Failed to parse expected YAML: {}", test_file.display());
-        let expected_unnormalized: Output =
+        let expected_unnormalized: Solution =
             serde_yaml::from_str(&expected_yaml).expect(&failure_message);
         let failure_message = format!("Failed to normalize expected YAML: {}", test_file.display());
         let expected_solution =
