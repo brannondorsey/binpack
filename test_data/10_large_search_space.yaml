@@ -1,0 +1,47 @@
+# Many identical choices create a huge search space
+clusters:
+  c1: 10
+  c2: 10
+  c3: 10
+  c4: 10
+  c5: 10
+workloads:
+  w1:
+    replicas: 25
+    groupSize: 5
+    affinity:
+      soft:
+        - weight: 5
+          clusters: [c1]
+        - weight: 4
+          clusters: [c2]
+        - weight: 3
+          clusters: [c3]
+        - weight: 2
+          clusters: [c4]
+        - weight: 1
+          clusters: [c5]
+  w2:
+    replicas: 25
+    groupSize: 5
+    affinity:
+      soft:
+        - weight: 5
+          clusters: [c5]
+        - weight: 4
+          clusters: [c4]
+        - weight: 3
+          clusters: [c3]
+        - weight: 2
+          clusters: [c2]
+        - weight: 1
+          clusters: [c1]
+solution:
+  w1:
+    c1: 10
+    c2: 10
+    c3: 5
+  w2:
+    c3: 5
+    c4: 10
+    c5: 10

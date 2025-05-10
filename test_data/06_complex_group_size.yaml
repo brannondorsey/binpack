@@ -1,0 +1,34 @@
+clusters:
+  c1: 10
+  c2: 10
+  c3: 5
+workloads:
+  w1:
+    replicas: 12
+    groupSize: 4
+    affinity:
+      soft:
+        - clusters: [c1]
+  w2:
+    replicas: 6
+    groupSize: 2
+    affinity:
+      soft:
+        - clusters: [c2]
+  w3:
+    replicas: 5
+    # NOTE: If you comment out groupSize, you can see that
+    # the microlp solver is unable to find a solution, but
+    # the coin_cbc solver can
+    groupSize: 5
+    affinity:
+      soft:
+        - clusters: [c3]
+solution:
+  w1:
+    c1: 8
+    c2: 4
+  w2:
+    c2: 6
+  w3:
+    c3: 5

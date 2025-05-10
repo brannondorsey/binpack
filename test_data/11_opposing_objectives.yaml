@@ -1,0 +1,19 @@
+# Conflicting soft constraints
+clusters:
+  c1: 10
+  c2: 10
+workloads:
+  w1:
+    replicas: 10
+    groupSize: 5
+    affinity:
+      soft:
+        - weight: 10
+          clusters: [c1]
+    antiAffinity:
+      soft:
+        - weight: 9
+          clusters: [c1]
+solution:
+  w1:
+    c1: 10

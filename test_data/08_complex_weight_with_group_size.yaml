@@ -1,0 +1,45 @@
+clusters:
+  c1: 5
+  c2: 5
+  c3: 5
+workloads:
+  w1:
+    replicas: 4
+    affinity:
+      hard:
+        clusters:
+          - c1
+  w2:
+    replicas: 3
+    affinity:
+      soft:
+        - weight: 100
+          clusters:
+            - c1
+        - weight: 50
+          clusters:
+            - c2
+  w3:
+    replicas: 8
+    groupSize: 4
+    affinity:
+      soft:
+        - weight: 10
+          clusters:
+            - c1
+        - weight: 5
+          clusters:
+            - c2
+        - weight: 1
+          clusters:
+            - c3
+solution:
+  w1:
+    c1: 4
+  w2:
+    c1: 1
+    c2: 1
+    c3: 1
+  w3:
+    c2: 4
+    c3: 4
