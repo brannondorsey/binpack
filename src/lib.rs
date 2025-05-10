@@ -70,79 +70,99 @@ pub struct HardRequirement {
 // non-linear operations, so we must reformulate them using auxiliary variables and linear
 // relationships like we've done here.
 
-pub fn solve(input: Problem) -> Result<Solution, Box<dyn std::error::Error>> {
-    let workloads = &input.workloads;
-    let clusters = &input.clusters;
-    let init_zero = Expression::from(0.0);
+impl Problem {
+    pub fn solve(&self) -> Result<Solution, Box<dyn std::error::Error>> {
+        let workloads = &self.workloads;
+        let clusters = &self.clusters;
+        let init_zero = Expression::from(0.0);
 
-    // Store each (workload, cluster) → Variable
-    let (replica_count_vars, workload_cluster_to_replica_count_var_map, group_count_vars) =
-        init_replica_count_vars(workloads, clusters);
+        // Store each (workload, cluster) → Variable
+        let (replica_count_vars, workload_cluster_to_replica_count_var_map, group_count_vars) =
+            init_replica_count_vars(workloads, clusters);
 
-    // Collect affinity and anti-affinity coefficients
-    let mut soft_requirement_weights = BTreeMap::new();
+        // Collect affinity and anti-affinity coefficients
+        let mut soft_requirement_weights = BTreeMap::new();
 
-    // Process affinity (positive weights)
-    process_soft_requirements(
-        workloads,
-        clusters,
-        |spec| spec.affinity.as_ref().map(|aff| &aff.soft),
-        1.0,
-        &mut soft_requirement_weights,
-    );
+        // Process affinity (positive weights)
+        process_soft_requirements(
+            workloads,
+            clusters,
+            |spec| spec.affinity.as_ref().map(|aff| &aff.soft),
+            1.0,
+            &mut soft_requirement_weights,
+        );
 
-    // Process anti-affinity (negative weights)
-    process_soft_requirements(
-        workloads,
-        clusters,
-        |spec| spec.anti_affinity.as_ref().map(|anti| &anti.soft),
-        -1.0,
-        &mut soft_requirement_weights,
-    );
+        // Process anti-affinity (negative weights)
+        process_soft_requirements(
+            workloads,
+            clusters,
+            |spec| spec.anti_affinity.as_ref().map(|anti| &anti.soft),
+            -1.0,
+            &mut soft_requirement_weights,
+        );
 
-    // Build objective function
-    let objective = soft_requirement_weights.iter().fold(
-        init_zero.clone(),
-        |sum, ((workload, cluster), &weight)| {
-            let replica_count_var =
-                workload_cluster_to_replica_count_var_map[&(workload.clone(), cluster.clone())];
+        // Build objective function
+        let objective = soft_requirement_weights.iter().fold(
+            init_zero.clone(),
+            |sum, ((workload, cluster), &weight)| {
+                let replica_count_var =
+                    workload_cluster_to_replica_count_var_map[&(workload.clone(), cluster.clone())];
 
-            sum + weight * replica_count_var
-        },
-    );
+                sum + weight * replica_count_var
+            },
+        );
 
-    // Build and solve the MILP with pure‑Rust microlp solver
-    // TODO: Try high as well (microlp couldn't solve some of our test cases)
-    let mut model = replica_count_vars.maximise(objective).using(coin_cbc);
+        // Build and solve the MILP with pure‑Rust microlp solver
+        // TODO: Try high as well (microlp couldn't solve some of our test cases)
+        let mut model = replica_count_vars.maximise(objective).using(coin_cbc);
 
-    // Add replica‐count equality for each workload
-    model = workloads.iter().fold(model, |m, (w, spec)| {
-        let total_replicas_placed = clusters
-            .keys()
-            .map(|c| workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
-            .fold(init_zero.clone(), |sum, replica_count| sum + replica_count);
+        // Add replica‐count equality for each workload
+        model = workloads.iter().fold(model, |m, (w, spec)| {
+            let total_replicas_placed = clusters
+                .keys()
+                .map(|c| workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
+                .fold(init_zero.clone(), |sum, replica_count| sum + replica_count);
 
-        let required_replicas = spec.replicas as f64;
-        let constraint = total_replicas_placed.eq(required_replicas);
-        m.with(constraint)
-    });
+            let required_replicas = spec.replicas as f64;
+            let constraint = total_replicas_placed.eq(required_replicas);
+            m.with(constraint)
+        });
 
-    // Enforce hard affinity constraints
-    model = workloads.iter().fold(model, |m, (w, spec)| {
-        if let Some(aff) = &spec.affinity {
-            if let Some(hard) = &aff.hard {
-                let valid_clusters: Vec<_> = hard
-                    .clusters
-                    .iter()
-                    .filter(|c| clusters.contains_key(*c))
-                    .cloned()
-                    .collect();
+        // Enforce hard affinity constraints
+        model = workloads.iter().fold(model, |m, (w, spec)| {
+            if let Some(aff) = &spec.affinity {
+                if let Some(hard) = &aff.hard {
+                    let valid_clusters: Vec<_> = hard
+                        .clusters
+                        .iter()
+                        .filter(|c| clusters.contains_key(*c))
+                        .cloned()
+                        .collect();
 
-                if !valid_clusters.is_empty() {
-                    // If there are hard affinity constraints, workload must be placed only on those clusters
-                    return clusters.keys().fold(m, |m2, c| {
-                        if !valid_clusters.contains(c) {
-                            // Force var == 0 for clusters not in the hard affinity list
+                    if !valid_clusters.is_empty() {
+                        // If there are hard affinity constraints, workload must be placed only on those clusters
+                        return clusters.keys().fold(m, |m2, c| {
+                            if !valid_clusters.contains(c) {
+                                // Force var == 0 for clusters not in the hard affinity list
+                                let v = workload_cluster_to_replica_count_var_map
+                                    [&(w.clone(), c.clone())];
+                                m2.with(constraint!(v == 0.0))
+                            } else {
+                                m2
+                            }
+                        });
+                    }
+                }
+            }
+            m
+        });
+
+        // Enforce hard anti‑affinity (var == 0)
+        model = workloads.iter().fold(model, |m, (w, spec)| {
+            if let Some(anti) = &spec.anti_affinity {
+                if let Some(hard) = &anti.hard {
+                    return hard.clusters.iter().fold(m, |m2, c| {
+                        if clusters.contains_key(c) {
                             let v =
                                 workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())];
                             m2.with(constraint!(v == 0.0))
@@ -152,94 +172,79 @@ pub fn solve(input: Problem) -> Result<Solution, Box<dyn std::error::Error>> {
                     });
                 }
             }
-        }
-        m
-    });
+            m
+        });
 
-    // Enforce hard anti‑affinity (var == 0)
-    model = workloads.iter().fold(model, |m, (w, spec)| {
-        if let Some(anti) = &spec.anti_affinity {
-            if let Some(hard) = &anti.hard {
-                return hard.clusters.iter().fold(m, |m2, c| {
-                    if clusters.contains_key(c) {
-                        let v = workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())];
-                        m2.with(constraint!(v == 0.0))
-                    } else {
-                        m2
-                    }
-                });
-            }
-        }
-        m
-    });
-
-    // Enforce cluster capacities
-    model = clusters.iter().fold(model, |m, (c, &cap)| {
-        let lhs = workloads
-            .keys()
-            .map(|w| workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
-            .fold(init_zero.clone(), |sum, v| sum + v);
-        m.with(lhs.leq(cap as f64))
-    });
-
-    // Enforce group size constraints
-    model = workloads.iter().fold(model, |m, (w, spec)| {
-        if let Some(group_size) = spec.group_size {
-            if group_size > 0 {
-                return clusters.keys().fold(m, |m2, c| {
-                    let replica_var =
-                        workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())];
-
-                    // Get the corresponding group count variable (represents number of complete groups)
-                    if let Some(&complete_groups_var) =
-                        group_count_vars.get(&(w.clone(), c.clone()))
-                    {
-                        // Add divisibility constraint:
-                        // replica_count = group_size * complete_groups
-                        // This enforces that replica_count must be a multiple of group_size
-                        //
-                        // We can't use a constraint like "replica_var % group_size == 0" because
-                        // modulo operations are not linear and can't be directly expressed in LP.
-                        // Instead, we use this auxiliary variable approach which accomplishes the
-                        // same mathematical requirement.
-                        let group_size_f = group_size as f64;
-
-                        // Mathematical relationship: replicas = group_size * complete_groups
-                        m2.with(constraint!(
-                            replica_var == group_size_f * complete_groups_var
-                        ))
-                    } else {
-                        m2
-                    }
-                });
-            }
-        }
-        m
-    });
-
-    // Solve
-    let solution = model.solve()?;
-
-    // Collect and print solution as YAML
-    let solution_map: BTreeMap<_, _> = workloads
-        .keys()
-        .filter_map(|w| {
-            let assigns: BTreeMap<_, _> = clusters
+        // Enforce cluster capacities
+        model = clusters.iter().fold(model, |m, (c, &cap)| {
+            let lhs = workloads
                 .keys()
-                .filter_map(|c| {
-                    let val = solution
-                        .value(workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
-                        .round() as u32;
-                    (val > 0).then_some((c.clone(), val))
-                })
-                .collect();
-            (!assigns.is_empty()).then_some((w.clone(), assigns))
-        })
-        .collect();
+                .map(|w| workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
+                .fold(init_zero.clone(), |sum, v| sum + v);
+            m.with(lhs.leq(cap as f64))
+        });
 
-    Ok(Solution {
-        solution: solution_map,
-    })
+        // Enforce group size constraints
+        model = workloads.iter().fold(model, |m, (w, spec)| {
+            if let Some(group_size) = spec.group_size {
+                if group_size > 0 {
+                    return clusters.keys().fold(m, |m2, c| {
+                        let replica_var =
+                            workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())];
+
+                        // Get the corresponding group count variable (represents number of complete groups)
+                        if let Some(&complete_groups_var) =
+                            group_count_vars.get(&(w.clone(), c.clone()))
+                        {
+                            // Add divisibility constraint:
+                            // replica_count = group_size * complete_groups
+                            // This enforces that replica_count must be a multiple of group_size
+                            //
+                            // We can't use a constraint like "replica_var % group_size == 0" because
+                            // modulo operations are not linear and can't be directly expressed in LP.
+                            // Instead, we use this auxiliary variable approach which accomplishes the
+                            // same mathematical requirement.
+                            let group_size_f = group_size as f64;
+
+                            // Mathematical relationship: replicas = group_size * complete_groups
+                            m2.with(constraint!(
+                                replica_var == group_size_f * complete_groups_var
+                            ))
+                        } else {
+                            m2
+                        }
+                    });
+                }
+            }
+            m
+        });
+
+        // Solve
+        let solution = model.solve()?;
+
+        // Collect and print solution as YAML
+        let solution_map: BTreeMap<_, _> = workloads
+            .keys()
+            .filter_map(|w| {
+                let assigns: BTreeMap<_, _> = clusters
+                    .keys()
+                    .filter_map(|c| {
+                        let val = solution
+                            .value(
+                                workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())],
+                            )
+                            .round() as u32;
+                        (val > 0).then_some((c.clone(), val))
+                    })
+                    .collect();
+                (!assigns.is_empty()).then_some((w.clone(), assigns))
+            })
+            .collect();
+
+        Ok(Solution {
+            solution: solution_map,
+        })
+    }
 }
 
 fn init_replica_count_vars(
@@ -331,7 +336,7 @@ mod tests {
 
         // Run the solver
         let failure_message = format!("Failed to solve test file: {}", test_file.display());
-        let solution = solve(input).expect(&failure_message);
+        let solution = input.solve().expect(&failure_message);
         let received_solution = serde_yaml::to_string(&solution).expect(&failure_message);
 
         // Compare the output (normalizing by parsing and re-serializing the expected)
