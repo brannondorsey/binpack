@@ -3,9 +3,8 @@ use good_lp::solvers::coin_cbc::coin_cbc;
 use good_lp::{
     Expression, ProblemVariables, SolverModel, Variable, constraint, variable, variables,
 };
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub struct Problem {
@@ -74,21 +73,21 @@ impl Problem {
     pub fn solve(&self) -> Result<Solution, Box<dyn std::error::Error>> {
         let workloads = &self.workloads;
         let clusters = &self.clusters;
-        let init_zero = Expression::from(0.0);
 
-        // Store each (workload, cluster) → Variable
-        let (replica_count_vars, workload_cluster_to_replica_count_var_map, group_count_vars) =
-            init_replica_count_vars(workloads, clusters);
+        // Create all variables, and LUTs of type (workload, cluster) → Variable
+        let (variables, replicas_map, group_count_map) = init_variables(workloads, clusters);
 
         // Collect affinity and anti-affinity coefficients
         let mut soft_requirement_weights = BTreeMap::new();
 
+        let affinity_coeff = 1.0;
+        let anti_affinity_coeff = -1.0;
         // Process affinity (positive weights)
         process_soft_requirements(
             workloads,
             clusters,
             |spec| spec.affinity.as_ref().map(|aff| &aff.soft),
-            1.0,
+            affinity_coeff,
             &mut soft_requirement_weights,
         );
 
@@ -97,149 +96,31 @@ impl Problem {
             workloads,
             clusters,
             |spec| spec.anti_affinity.as_ref().map(|anti| &anti.soft),
-            -1.0,
+            anti_affinity_coeff,
             &mut soft_requirement_weights,
         );
 
         // Build objective function
-        let objective = soft_requirement_weights.iter().fold(
-            init_zero.clone(),
-            |sum, ((workload, cluster), &weight)| {
-                let replica_count_var =
-                    workload_cluster_to_replica_count_var_map[&(workload.clone(), cluster.clone())];
+        let objective = create_objective_function(&replicas_map, &soft_requirement_weights);
 
-                sum + weight * replica_count_var
-            },
-        );
+        // TODO: Try replacing coin_cbc with high (microlp couldn't solve some of our test cases)
+        let model = variables.maximise(objective).using(coin_cbc);
 
-        // Build and solve the MILP with pure‑Rust microlp solver
-        // TODO: Try high as well (microlp couldn't solve some of our test cases)
-        let mut model = replica_count_vars.maximise(objective).using(coin_cbc);
-
-        // Add replica‐count equality for each workload
-        model = workloads.iter().fold(model, |m, (w, spec)| {
-            let total_replicas_placed = clusters
-                .keys()
-                .map(|c| workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
-                .fold(init_zero.clone(), |sum, replica_count| sum + replica_count);
-
-            let required_replicas = spec.replicas as f64;
-            let constraint = total_replicas_placed.eq(required_replicas);
-            m.with(constraint)
-        });
-
-        // Enforce hard affinity constraints
-        model = workloads.iter().fold(model, |m, (w, spec)| {
-            if let Some(aff) = &spec.affinity {
-                if let Some(hard) = &aff.hard {
-                    let valid_clusters: Vec<_> = hard
-                        .clusters
-                        .iter()
-                        .filter(|c| clusters.contains_key(*c))
-                        .cloned()
-                        .collect();
-
-                    if !valid_clusters.is_empty() {
-                        // If there are hard affinity constraints, workload must be placed only on those clusters
-                        return clusters.keys().fold(m, |m2, c| {
-                            if !valid_clusters.contains(c) {
-                                // Force var == 0 for clusters not in the hard affinity list
-                                let v = workload_cluster_to_replica_count_var_map
-                                    [&(w.clone(), c.clone())];
-                                m2.with(constraint!(v == 0.0))
-                            } else {
-                                m2
-                            }
-                        });
-                    }
-                }
-            }
-            m
-        });
-
-        // Enforce hard anti‑affinity (var == 0)
-        model = workloads.iter().fold(model, |m, (w, spec)| {
-            if let Some(anti) = &spec.anti_affinity {
-                if let Some(hard) = &anti.hard {
-                    return hard.clusters.iter().fold(m, |m2, c| {
-                        if clusters.contains_key(c) {
-                            let v =
-                                workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())];
-                            m2.with(constraint!(v == 0.0))
-                        } else {
-                            m2
-                        }
-                    });
-                }
-            }
-            m
-        });
-
-        // Enforce cluster capacities
-        model = clusters.iter().fold(model, |m, (c, &cap)| {
-            let lhs = workloads
-                .keys()
-                .map(|w| workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())])
-                .fold(init_zero.clone(), |sum, v| sum + v);
-            m.with(lhs.leq(cap as f64))
-        });
-
-        // Enforce group size constraints
-        model = workloads.iter().fold(model, |m, (w, spec)| {
-            if let Some(group_size) = spec.group_size {
-                if group_size > 0 {
-                    return clusters.keys().fold(m, |m2, c| {
-                        let replica_var =
-                            workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())];
-
-                        // Get the corresponding group count variable (represents number of complete groups)
-                        if let Some(&complete_groups_var) =
-                            group_count_vars.get(&(w.clone(), c.clone()))
-                        {
-                            // Add divisibility constraint:
-                            // replica_count = group_size * complete_groups
-                            // This enforces that replica_count must be a multiple of group_size
-                            //
-                            // We can't use a constraint like "replica_var % group_size == 0" because
-                            // modulo operations are not linear and can't be directly expressed in LP.
-                            // Instead, we use this auxiliary variable approach which accomplishes the
-                            // same mathematical requirement.
-                            let group_size_f = group_size as f64;
-
-                            // Mathematical relationship: replicas = group_size * complete_groups
-                            m2.with(constraint!(
-                                replica_var == group_size_f * complete_groups_var
-                            ))
-                        } else {
-                            m2
-                        }
-                    });
-                }
-            }
-            m
-        });
+        // Add constraints
+        #[rustfmt::skip]
+        let model =
+            constrain_replica_counts_must_equal_desired_sizes(model, workloads, clusters, &replicas_map);
+        let model = constrain_hard_placement_rules(model, workloads, clusters, &replicas_map);
+        let model = constrain_cluster_capacities(model, workloads, clusters, &replicas_map);
+        let model =
+            constrain_group_sizes(model, workloads, clusters, &replicas_map, &group_count_map);
 
         // Solve
         let solution = model.solve()?;
 
-        // Collect and print solution as YAML
-        let solution_map: BTreeMap<_, _> = workloads
-            .keys()
-            .filter_map(|w| {
-                let assigns: BTreeMap<_, _> = clusters
-                    .keys()
-                    .filter_map(|c| {
-                        let val = solution
-                            .value(
-                                workload_cluster_to_replica_count_var_map[&(w.clone(), c.clone())],
-                            )
-                            .round() as u32;
-                        (val > 0).then_some((c.clone(), val))
-                    })
-                    .collect();
-                (!assigns.is_empty()).then_some((w.clone(), assigns))
-            })
-            .collect();
+        // Convert the solver's solution into our final workload assignment map
+        let solution_map =
+            create_workload_assignments(&solution, workloads, clusters, &replicas_map);
 
         Ok(Solution {
             solution: solution_map,
@@ -247,36 +128,38 @@ impl Problem {
     }
 }
 
-fn init_replica_count_vars(
+type ClusterWorkloadToVariableMap = BTreeMap<(String, String), Variable>;
+
+fn init_variables(
     workloads: &BTreeMap<String, WorkloadSpec>,
     clusters: &BTreeMap<String, u32>,
 ) -> (
     ProblemVariables,
-    BTreeMap<(String, String), Variable>,
-    BTreeMap<(String, String), Variable>, // Map for "complete groups" count variables
+    ClusterWorkloadToVariableMap,
+    ClusterWorkloadToVariableMap,
 ) {
     let mut problem_vars = variables!();
-    let mut replica_count_var_map = BTreeMap::new();
-    let mut complete_groups_var_map = BTreeMap::new(); // Holds variables for count of complete groups
+    let mut replicas_map = BTreeMap::new();
+    let mut group_count_map = BTreeMap::new();
 
     // Create all variables upfront
     for (workload, spec) in workloads.iter() {
         for cluster in clusters.keys() {
+            let key = (workload.clone(), cluster.clone());
             // Replica count variable - total replicas of this workload in this cluster
             let replica_count = problem_vars.add(variable().integer().min(0));
-            replica_count_var_map.insert((workload.clone(), cluster.clone()), replica_count);
+            replicas_map.insert(key.clone(), replica_count);
 
             // If this workload has a group size, also create a "complete groups" variable
             // This auxiliary variable represents how many complete groups are placed in this cluster
             if spec.group_size.is_some() && spec.group_size.unwrap() > 0 {
                 let complete_groups = problem_vars.add(variable().integer().min(0));
-                complete_groups_var_map
-                    .insert((workload.clone(), cluster.clone()), complete_groups);
+                group_count_map.insert(key, complete_groups);
             }
         }
     }
 
-    (problem_vars, replica_count_var_map, complete_groups_var_map)
+    (problem_vars, replicas_map, group_count_map)
 }
 
 fn process_soft_requirements(
@@ -308,6 +191,220 @@ fn process_soft_requirements(
         .for_each(|(w, c, weight)| {
             *obj_coeffs.entry((w.clone(), c.clone())).or_insert(0.0) += weight;
         });
+}
+
+fn create_objective_function(
+    replicas_map: &ClusterWorkloadToVariableMap,
+    soft_requirement_weights: &BTreeMap<(String, String), f64>,
+) -> Expression {
+    soft_requirement_weights.iter().fold(
+        Expression::from(0.0),
+        |sum, ((workload, cluster), &soft_requirement_weight)| {
+            let key = (workload.clone(), cluster.clone());
+            let replica_count_var = replicas_map[&key];
+
+            sum + replica_count_var * soft_requirement_weight
+        },
+    )
+}
+
+/// Add constraints that replica counts must equal desired sizes to the model
+fn constrain_replica_counts_must_equal_desired_sizes<Model: SolverModel>(
+    model: Model,
+    workloads: &BTreeMap<String, WorkloadSpec>,
+    clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> Model {
+    workloads.iter().fold(model, |m, (w, spec)| {
+        let zero = Expression::from(0.0);
+        let total_replicas_placed = clusters
+            .keys()
+            .map(|c| replicas_map[&(w.clone(), c.clone())])
+            .fold(zero, |sum, replica_count| sum + replica_count);
+
+        let required_replicas = spec.replicas as f64;
+        let constraint = total_replicas_placed.eq(required_replicas);
+        m.with(constraint)
+    })
+}
+
+/// Add cluster capacity constraints to the model
+fn constrain_cluster_capacities<Model: SolverModel>(
+    model: Model,
+    workloads: &BTreeMap<String, WorkloadSpec>,
+    clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> Model {
+    clusters.iter().fold(model, |m, (c, &cap)| {
+        let zero = Expression::from(0.0);
+        let lhs = workloads
+            .keys()
+            .map(|w| replicas_map[&(w.clone(), c.clone())])
+            .fold(zero, |sum, v| sum + v);
+        m.with(lhs.leq(cap as f64))
+    })
+}
+
+/// Add hard placement rules like affinity and anti-affinity to the model
+fn constrain_hard_placement_rules<Model: SolverModel>(
+    model: Model,
+    workloads: &BTreeMap<String, WorkloadSpec>,
+    clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> Model {
+    workloads.iter().fold(model, |m, (w, spec)| {
+        let model =
+            if let Some(valid_clusters) = get_valid_clusters_based_on_affinity(spec, clusters) {
+                constrain_workload_to_clusters(m, w, &valid_clusters, clusters, replicas_map)
+            } else {
+                m
+            };
+
+        if let Some(forbidden_clusters) = get_valid_clusters_based_on_anti_affinity(spec, clusters)
+        {
+            constrain_workload_from_clusters(model, w, &forbidden_clusters, replicas_map)
+        } else {
+            model
+        }
+    })
+}
+
+fn get_valid_clusters_based_on_affinity(
+    spec: &WorkloadSpec,
+    clusters: &BTreeMap<String, u32>,
+) -> Option<Vec<String>> {
+    spec.affinity
+        .as_ref()
+        .and_then(|aff| aff.hard.as_ref())
+        .map(|hard| {
+            hard.clusters
+                .iter()
+                .filter(|c| clusters.contains_key(*c))
+                .cloned()
+                .collect()
+        })
+        .filter(|valid: &Vec<String>| !valid.is_empty())
+}
+
+fn get_valid_clusters_based_on_anti_affinity(
+    spec: &WorkloadSpec,
+    clusters: &BTreeMap<String, u32>,
+) -> Option<Vec<String>> {
+    spec.anti_affinity
+        .as_ref()
+        .and_then(|anti| anti.hard.as_ref())
+        .map(|hard| {
+            hard.clusters
+                .iter()
+                .filter(|c| clusters.contains_key(*c))
+                .cloned()
+                .collect()
+        })
+}
+
+fn constrain_workload_to_clusters<Model: SolverModel>(
+    model: Model,
+    workload: &str,
+    valid_clusters: &[String],
+    all_clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> Model {
+    all_clusters.keys().fold(model, |m, c| {
+        if !valid_clusters.contains(c) {
+            let v = replicas_map[&(workload.to_owned(), c.to_owned())];
+            m.with(constraint!(v == 0.0))
+        } else {
+            m
+        }
+    })
+}
+
+fn constrain_workload_from_clusters<Model: SolverModel>(
+    model: Model,
+    workload: &str,
+    forbidden_clusters: &[String],
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> Model {
+    forbidden_clusters.iter().fold(model, |m, c| {
+        let v = replicas_map[&(workload.to_owned(), c.to_owned())];
+        m.with(constraint!(v == 0.0))
+    })
+}
+
+fn constrain_group_sizes<Model: SolverModel>(
+    model: Model,
+    workloads: &BTreeMap<String, WorkloadSpec>,
+    clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+    group_count_map: &ClusterWorkloadToVariableMap,
+) -> Model {
+    workloads.iter().fold(model, |m, (w, spec)| {
+        if let Some(group_size) = spec.group_size {
+            if group_size > 0 {
+                return clusters.keys().fold(m, |m2, c| {
+                    let key = (w.clone(), c.clone());
+                    let replica_var = replicas_map[&key];
+
+                    // Get the corresponding group count variable (represents number of complete groups)
+                    if let Some(&complete_groups_var) = group_count_map.get(&key) {
+                        // Add divisibility constraint:
+                        // replica_count = group_size * complete_groups
+                        // This enforces that replica_count must be a multiple of group_size
+                        //
+                        // We can't use a constraint like "replica_var % group_size == 0" because
+                        // modulo operations are not linear and can't be directly expressed in LP.
+                        // Instead, we use this auxiliary variable approach which accomplishes the
+                        // same mathematical requirement.
+                        m2.with(constraint!(
+                            replica_var == complete_groups_var * (group_size as f32)
+                        ))
+                    } else {
+                        m2
+                    }
+                });
+            }
+        }
+        m
+    })
+}
+
+/// Create a map of workload assignments from the solver's solution
+fn create_workload_assignments(
+    solution: &impl LpSolution,
+    workloads: &BTreeMap<String, WorkloadSpec>,
+    clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> BTreeMap<String, BTreeMap<String, u32>> {
+    workloads
+        .keys()
+        .filter_map(|workload| {
+            let cluster_assignments =
+                get_cluster_assignments(solution, workload, clusters, replicas_map);
+
+            // Only include workloads that have at least one assignment
+            (!cluster_assignments.is_empty()).then_some((workload.clone(), cluster_assignments))
+        })
+        .collect()
+}
+
+/// Get the replica assignments for a workload across all clusters
+fn get_cluster_assignments(
+    solution: &impl LpSolution,
+    workload: &str,
+    clusters: &BTreeMap<String, u32>,
+    replicas_map: &ClusterWorkloadToVariableMap,
+) -> BTreeMap<String, u32> {
+    clusters
+        .keys()
+        .filter_map(|cluster| {
+            let key = (workload.to_string(), cluster.clone());
+            let replica_count = solution.value(replicas_map[&key]).round() as u32;
+            let cluster = key.1;
+
+            // Only include clusters with at least one replica
+            (replica_count > 0).then_some((cluster, replica_count))
+        })
+        .collect()
 }
 
 #[cfg(test)]
