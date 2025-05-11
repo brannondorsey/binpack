@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub struct Problem {
+    // TODO: Find a nice way to do these remappings in an API
     #[serde(rename = "workloads")]
     pub items: BTreeMap<String, ItemSpec>,
     #[serde(rename = "clusters")]
@@ -71,14 +72,12 @@ impl Problem {
         // Collect affinity and anti-affinity coefficients
         let mut soft_requirement_weights = BTreeMap::new();
 
-        let affinity_coeff = 1.0;
-        let anti_affinity_coeff = -1.0;
         // Process affinity (positive weights)
         process_soft_requirements(
             items,
             bins,
             |spec| spec.affinity.as_ref().map(|aff| &aff.soft),
-            affinity_coeff,
+            1.0,
             &mut soft_requirement_weights,
         );
 
@@ -87,7 +86,7 @@ impl Problem {
             items,
             bins,
             |spec| spec.anti_affinity.as_ref().map(|anti| &anti.soft),
-            anti_affinity_coeff,
+            -1.0,
             &mut soft_requirement_weights,
         );
 
@@ -154,29 +153,31 @@ fn process_soft_requirements(
     weight_factor: f64,
     obj_coeffs: &mut BTreeMap<(String, String), f64>,
 ) {
-    // TODO: Improve the readability of this function
-    items
-        .iter()
-        .filter_map(|(item, spec)| {
-            get_reqs(spec)
-                .and_then(|soft_opt| soft_opt.as_ref())
-                .map(|soft_reqs| (item, soft_reqs))
-        })
-        .flat_map(|(item, soft_reqs)| {
-            soft_reqs
-                .iter()
-                .flat_map(|soft| {
-                    soft.bins
-                        .iter()
-                        .filter(|b| bins.contains_key(*b))
-                        .map(move |b| (item.clone(), b.clone(), soft.weight * weight_factor))
-                        .collect::<Vec<_>>()
-                })
-                .collect::<Vec<_>>()
-        })
-        .for_each(|(item, bin, weight)| {
-            *obj_coeffs.entry((item.clone(), bin.clone())).or_insert(0.0) += weight;
-        });
+    // For each item that has soft requirements
+    for (item_name, item_spec) in items.iter() {
+        // Get the soft requirements (e.g. affinity or anti-affinity)
+        let soft_requirements = get_reqs(item_spec)
+            .and_then(|maybe_reqs| maybe_reqs.as_ref())
+            .into_iter()
+            .flatten();
+
+        // Process each soft requirement
+        for preference in soft_requirements {
+            // For each valid bin in the requirement
+            for bin_name in &preference.bins {
+                // Skip if bin doesn't exist
+                if !bins.contains_key(bin_name) {
+                    continue;
+                }
+                let key = (item_name.clone(), bin_name.clone());
+
+                // Calculate the weighted score for this item-bin pair
+                // and add it to the objective coefficients
+                let weighted_score = preference.weight * weight_factor;
+                *obj_coeffs.entry(key).or_insert(0.0) += weighted_score;
+            }
+        }
+    }
 }
 
 fn create_objective_function(
