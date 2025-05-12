@@ -92,9 +92,7 @@ impl Problem {
 
         // Build objective function
         let objective = create_objective_function(&replicas_map, &soft_requirement_weights);
-
-        // TODO: Try replacing coin_cbc with high (microlp couldn't solve some of our test cases)
-        let model = variables.maximise(objective).using(coin_cbc);
+        let model = create_model(variables, objective);
 
         // Add constraints
         #[rustfmt::skip]
@@ -193,6 +191,15 @@ fn create_objective_function(
             sum + replica_count_var * soft_requirement_weight
         },
     )
+}
+
+/// Create a model with the given objective function
+fn create_model(variables: ProblemVariables, objective: Expression) -> impl SolverModel {
+    #[allow(unused_mut)]
+    let mut model = variables.maximise(objective).using(coin_cbc);
+    #[cfg(not(debug_assertions))]
+    model.set_parameter("loglevel", "0");
+    model
 }
 
 /// Add constraints that replica counts must equal desired sizes to the model
