@@ -1,17 +1,17 @@
 # Test case with extremely large and small numbers
-clusters:
-  c1: 10001
-  c2: 10000
-workloads:
-  w1:
+bins:
+  b1: 10001
+  b2: 10000
+items:
+  i1:
     replicas: 9999
     groupSize: 3333
-  w2:
+  i2:
     replicas: 10002
     groupSize: 1
 solution:
-  w1:
-    c2: 9999
-  w2:
-    c1: 10001
-    c2: 1
+  i1:
+    b2: 9999
+  i2:
+    b1: 10001
+    b2: 1

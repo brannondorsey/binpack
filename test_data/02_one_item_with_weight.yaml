@@ -4,18 +4,12 @@ bins:
 items:
   i1:
     replicas: 8
-    groupSize: 4
     affinity:
       soft:
         - weight: 1
           bins:
             - b1
-  i2:
-    replicas: 2
 solution:
   i1:
-    b1: 4
-    b2: 4
-  i2:
-    b1: 1
-    b2: 1
+    b1: 5
+    b2: 3

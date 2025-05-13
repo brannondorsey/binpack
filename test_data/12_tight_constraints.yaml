@@ -1,50 +1,50 @@
 # Diabolically tight constraints
-clusters:
-  c1: 7
-  c2: 9
-  c3: 11
-  c4: 13
-  c5: 9
-workloads:
-  w1:
+bins:
+  b1: 7
+  b2: 9
+  b3: 11
+  b4: 13
+  b5: 9
+items:
+  i1:
     replicas: 12
     groupSize: 6
     affinity:
       soft:
         - weight: 2
-          clusters: [c1, c2]
-  w2:
+          bins: [b1, b2]
+  i2:
     replicas: 15
     groupSize: 5
     affinity:
       soft:
         - weight: 2
-          clusters: [c3, c4]
-  w3:
+          bins: [b3, b4]
+  i3:
     replicas: 16
     groupSize: 4
     affinity:
       soft:
         - weight: 1
-          clusters: [c4, c5]
-  w4:
+          bins: [b4, b5]
+  i4:
     replicas: 5
     groupSize: 5
     antiAffinity:
       soft:
         - weight: 1
-          clusters: [c1, c2, c3]
+          bins: [b1, b2, b3]
 solution:
-  w1:
-    c1: 6
-    c3: 6
-  w2:
-    c2: 5
-    c3: 5
-    c4: 5
-  w3:
-    c2: 4
-    c4: 8
-    c5: 4
-  w4:
-    c5: 5
+  i1:
+    b1: 6
+    b3: 6
+  i2:
+    b2: 5
+    b3: 5
+    b4: 5
+  i3:
+    b2: 4
+    b4: 8
+    b5: 4
+  i4:
+    b5: 5

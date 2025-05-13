@@ -8,10 +8,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub struct Problem {
-    // TODO: Find a nice way to do these remappings in an API
-    #[serde(rename = "workloads")]
     pub items: BTreeMap<String, ItemSpec>,
-    #[serde(rename = "clusters")]
     pub bins: BTreeMap<String, u32>,
 }
 
@@ -46,7 +43,6 @@ pub struct AntiAffinity {
 pub struct SoftRequirement {
     #[serde(default = "default_weight")]
     pub weight: f64,
-    #[serde(rename = "clusters")]
     pub bins: Vec<String>,
 }
 fn default_weight() -> f64 {
@@ -55,7 +51,6 @@ fn default_weight() -> f64 {
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct HardRequirement {
-    #[serde(rename = "clusters")]
     pub bins: Vec<String>,
 }
 

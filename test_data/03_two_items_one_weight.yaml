@@ -1,0 +1,18 @@
+bins:
+  b1: 2
+  b2: 5
+items:
+  i1:
+    replicas: 4
+    antiAffinity:
+      hard:
+        bins:
+          - b1
+  i2:
+    replicas: 3
+solution:
+  i1:
+    b2: 4
+  i2:
+    b1: 2
+    b2: 1

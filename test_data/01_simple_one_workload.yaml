@@ -1,8 +1,0 @@
-clusters:
-  c1: 5
-workloads:
-  w1:
-    replicas: 5
-solution:
-  w1:
-    c1: 5

@@ -1,0 +1,8 @@
+bins:
+  b1: 5
+items:
+  i1:
+    replicas: 5
+solution:
+  i1:
+    b1: 5
