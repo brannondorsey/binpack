@@ -2,6 +2,14 @@
 name = "binpack"
 version = "0.1.0"
 edition = "2024"
+description = "solve binpacking problems using Linear Programming"
+authors = ["Brannon Dorsey <brannon@brannondorsey.com>"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/brannondorsey/binpack"
+keywords = ["binpacking", "linear programming"]
+categories = ["mathematics", "algorithms"]
+exclude = [".github/*"]
 
 [dependencies]
 good_lp = { version = "1.13.0" }
