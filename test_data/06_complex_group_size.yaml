@@ -4,19 +4,19 @@ bins:
   b3: 5
 items:
   i1:
-    replicas: 12
+    quantity: 12
     groupSize: 4
     affinity:
       soft:
         - bins: [b1]
   i2:
-    replicas: 6
+    quantity: 6
     groupSize: 2
     affinity:
       soft:
         - bins: [b2]
   i3:
-    replicas: 5
+    quantity: 5
     # NOTE: If you comment out groupSize, you can see that
     # the microlp solver is unable to find a solution, but
     # the coin_cbc solver can

@@ -4,10 +4,10 @@ bins:
   b2: 10000
 items:
   i1:
-    replicas: 9999
+    quantity: 9999
     groupSize: 3333
   i2:
-    replicas: 10002
+    quantity: 10002
     groupSize: 1
 solution:
   i1:

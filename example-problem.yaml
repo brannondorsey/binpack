@@ -5,7 +5,7 @@ bins:
 
 items:
   i1:
-    replicas: 30
+    quantity: 30
     affinity:
       soft:
         - weight: 1
@@ -14,10 +14,10 @@ items:
       hard:
         bins: [b3]
   i2:
-    replicas: 110
+    quantity: 110
     affinity:
       soft:
         - weight: 2
           bins: [b1]
   i3:
-    replicas: 10
+    quantity: 10

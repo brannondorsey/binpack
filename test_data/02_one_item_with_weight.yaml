@@ -3,7 +3,7 @@ bins:
   b2: 5
 items:
   i1:
-    replicas: 8
+    quantity: 8
     affinity:
       soft:
         - weight: 1

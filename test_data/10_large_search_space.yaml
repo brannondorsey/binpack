@@ -7,7 +7,7 @@ bins:
   b5: 10
 items:
   i1:
-    replicas: 25
+    quantity: 25
     groupSize: 5
     affinity:
       soft:
@@ -22,7 +22,7 @@ items:
         - weight: 1
           bins: [b5]
   i2:
-    replicas: 25
+    quantity: 25
     groupSize: 5
     affinity:
       soft:

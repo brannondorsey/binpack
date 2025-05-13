@@ -4,13 +4,13 @@ bins:
   b3: 5
 items:
   w1:
-    replicas: 4
+    quantity: 4
     affinity:
       hard:
         bins:
           - b1
   w2:
-    replicas: 3
+    quantity: 3
     affinity:
       soft:
         - weight: 100
@@ -20,7 +20,7 @@ items:
           bins:
             - b2
   w3:
-    replicas: 8
+    quantity: 8
     groupSize: 4
     affinity:
       soft:

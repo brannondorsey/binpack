@@ -3,13 +3,13 @@ bins:
   b2: 5
 items:
   i1:
-    replicas: 4
+    quantity: 4
     antiAffinity:
       hard:
         bins:
           - b1
   i2:
-    replicas: 3
+    quantity: 3
 solution:
   i1:
     b2: 4

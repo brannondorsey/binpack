@@ -3,7 +3,7 @@ bins:
   b2: 5
 items:
   i1:
-    replicas: 8
+    quantity: 8
     groupSize: 4
     affinity:
       soft:
@@ -11,7 +11,7 @@ items:
           bins:
             - b1
   i2:
-    replicas: 2
+    quantity: 2
 solution:
   i1:
     b1: 4

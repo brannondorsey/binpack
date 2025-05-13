@@ -19,7 +19,7 @@ pub struct Solution {
 
 #[derive(Debug, Deserialize)]
 pub struct ItemSpec {
-    pub replicas: u32,
+    pub quantity: u32,
     #[serde(rename = "groupSize")]
     pub group_size: Option<u32>,
     pub affinity: Option<Affinity>,
@@ -54,7 +54,7 @@ pub struct HardRequirement {
     pub bins: Vec<String>,
 }
 
-// TODO: Manually validate replica counts are multiples of group sizes
+// TODO: Manually validate quantities are multiples of group sizes
 //       We could have a series of simple_validations()
 impl Problem {
     pub fn solve(&self) -> Result<Solution, Box<dyn std::error::Error>> {
@@ -62,7 +62,7 @@ impl Problem {
         let bins = &self.bins;
 
         // Create all variables, and LUTs of type (item, bin) → Variable
-        let (variables, replicas_map, group_count_map) = init_variables(items, bins);
+        let (variables, quantity_map, group_count_map) = init_variables(items, bins);
 
         // Collect affinity and anti-affinity coefficients
         let mut soft_requirement_weights = BTreeMap::new();
@@ -86,22 +86,22 @@ impl Problem {
         );
 
         // Build objective function
-        let objective = create_objective_function(&replicas_map, &soft_requirement_weights);
+        let objective = create_objective_function(&quantity_map, &soft_requirement_weights);
         let model = create_model(variables, objective);
 
         // Add constraints
         #[rustfmt::skip]
         let model =
-            constrain_replica_counts_must_equal_desired_sizes(model, items, bins, &replicas_map);
-        let model = constrain_hard_placement_rules(model, items, bins, &replicas_map);
-        let model = constrain_bin_capacities(model, items, bins, &replicas_map);
-        let model = constrain_group_sizes(model, items, bins, &replicas_map, &group_count_map);
+            constrain_quantities_must_equal_desired_sizes(model, items, bins, &quantity_map);
+        let model = constrain_hard_placement_rules(model, items, bins, &quantity_map);
+        let model = constrain_bin_capacities(model, items, bins, &quantity_map);
+        let model = constrain_group_sizes(model, items, bins, &quantity_map, &group_count_map);
 
         // Solve
         let solution = model.solve()?;
 
         // Convert the solver's solution into our final item assignment map
-        let solution_map = create_item_assignments(&solution, items, bins, &replicas_map);
+        let solution_map = create_item_assignments(&solution, items, bins, &quantity_map);
 
         Ok(Solution {
             solution: solution_map,
@@ -116,16 +116,16 @@ fn init_variables(
     bins: &BTreeMap<String, u32>,
 ) -> (ProblemVariables, BinItemToVariableMap, BinItemToVariableMap) {
     let mut problem_vars = variables!();
-    let mut replicas_map = BTreeMap::new();
+    let mut quantity_map = BTreeMap::new();
     let mut group_count_map = BTreeMap::new();
 
     // Create all variables upfront
     for (item, spec) in items.iter() {
         for bin in bins.keys() {
             let key = (item.clone(), bin.clone());
-            // Replica count variable - total replicas of this item in this bin
-            let replica_count = problem_vars.add(variable().integer().min(0));
-            replicas_map.insert(key.clone(), replica_count);
+            // Quantity variable - total quantity of this item in this bin
+            let quantity = problem_vars.add(variable().integer().min(0));
+            quantity_map.insert(key.clone(), quantity);
 
             // If this item has a group size, also create a "complete groups" variable
             // This auxiliary variable represents how many complete groups are placed in this bin
@@ -136,7 +136,7 @@ fn init_variables(
         }
     }
 
-    (problem_vars, replicas_map, group_count_map)
+    (problem_vars, quantity_map, group_count_map)
 }
 
 fn process_soft_requirements(
@@ -174,16 +174,16 @@ fn process_soft_requirements(
 }
 
 fn create_objective_function(
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
     soft_requirement_weights: &BTreeMap<(String, String), f64>,
 ) -> Expression {
     soft_requirement_weights.iter().fold(
         Expression::from(0.0),
         |sum, ((item, bin), &soft_requirement_weight)| {
             let key = (item.clone(), bin.clone());
-            let replica_count_var = replicas_map[&key];
+            let quantity_var = quantity_map[&key];
 
-            sum + replica_count_var * soft_requirement_weight
+            sum + quantity_var * soft_requirement_weight
         },
     )
 }
@@ -197,22 +197,22 @@ fn create_model(variables: ProblemVariables, objective: Expression) -> impl Solv
     model
 }
 
-/// Add constraints that replica counts must equal desired sizes to the model
-fn constrain_replica_counts_must_equal_desired_sizes<Model: SolverModel>(
+/// Add constraints that quantities must equal desired sizes to the model
+fn constrain_quantities_must_equal_desired_sizes<Model: SolverModel>(
     model: Model,
     items: &BTreeMap<String, ItemSpec>,
     bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> Model {
     items.iter().fold(model, |m, (item, spec)| {
         let zero = Expression::from(0.0);
-        let total_replicas_placed = bins
+        let total_quantity_placed = bins
             .keys()
-            .map(|bin| replicas_map[&(item.clone(), bin.clone())])
-            .fold(zero, |sum, replica_count| sum + replica_count);
+            .map(|bin| quantity_map[&(item.clone(), bin.clone())])
+            .fold(zero, |sum, quantity| sum + quantity);
 
-        let required_replicas = spec.replicas as f64;
-        let constraint = total_replicas_placed.eq(required_replicas);
+        let required_quantity = spec.quantity as f64;
+        let constraint = total_quantity_placed.eq(required_quantity);
         m.with(constraint)
     })
 }
@@ -222,13 +222,13 @@ fn constrain_bin_capacities<Model: SolverModel>(
     model: Model,
     items: &BTreeMap<String, ItemSpec>,
     bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> Model {
     bins.iter().fold(model, |m, (bin, &cap)| {
         let zero = Expression::from(0.0);
         let lhs = items
             .keys()
-            .map(|item| replicas_map[&(item.clone(), bin.clone())])
+            .map(|item| quantity_map[&(item.clone(), bin.clone())])
             .fold(zero, |sum, v| sum + v);
         m.with(lhs.leq(cap as f64))
     })
@@ -239,17 +239,17 @@ fn constrain_hard_placement_rules<Model: SolverModel>(
     model: Model,
     items: &BTreeMap<String, ItemSpec>,
     bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> Model {
     items.iter().fold(model, |m, (w, spec)| {
         let model = if let Some(valid_bins) = get_valid_bins_based_on_affinity(spec, bins) {
-            constrain_item_to_bins(m, w, &valid_bins, bins, replicas_map)
+            constrain_item_to_bins(m, w, &valid_bins, bins, quantity_map)
         } else {
             m
         };
 
         if let Some(forbidden_bins) = get_valid_bins_based_on_anti_affinity(spec, bins) {
-            constrain_item_from_bins(model, w, &forbidden_bins, replicas_map)
+            constrain_item_from_bins(model, w, &forbidden_bins, quantity_map)
         } else {
             model
         }
@@ -294,11 +294,11 @@ fn constrain_item_to_bins<Model: SolverModel>(
     item: &str,
     valid_bins: &[String],
     all_bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> Model {
     all_bins.keys().fold(model, |m, c| {
         if !valid_bins.contains(c) {
-            let v = replicas_map[&(item.to_owned(), c.to_owned())];
+            let v = quantity_map[&(item.to_owned(), c.to_owned())];
             m.with(constraint!(v == 0.0))
         } else {
             m
@@ -310,10 +310,10 @@ fn constrain_item_from_bins<Model: SolverModel>(
     model: Model,
     item: &str,
     forbidden_bins: &[String],
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> Model {
     forbidden_bins.iter().fold(model, |m, c| {
-        let v = replicas_map[&(item.to_owned(), c.to_owned())];
+        let v = quantity_map[&(item.to_owned(), c.to_owned())];
         m.with(constraint!(v == 0.0))
     })
 }
@@ -322,7 +322,7 @@ fn constrain_group_sizes<Model: SolverModel>(
     model: Model,
     items: &BTreeMap<String, ItemSpec>,
     bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
     group_count_map: &BinItemToVariableMap,
 ) -> Model {
     items.iter().fold(model, |m, (item, spec)| {
@@ -330,20 +330,20 @@ fn constrain_group_sizes<Model: SolverModel>(
             if group_size > 0 {
                 return bins.keys().fold(m, |m2, bin| {
                     let key = (item.clone(), bin.clone());
-                    let replica_var = replicas_map[&key];
+                    let quantity_var = quantity_map[&key];
 
                     // Get the corresponding group count variable (represents number of complete groups)
                     if let Some(&complete_groups_var) = group_count_map.get(&key) {
                         // Add divisibility constraint:
-                        // replica_count = group_size * complete_groups
-                        // This enforces that replica_count must be a multiple of group_size
+                        // quantity = group_size * complete_groups
+                        // This enforces that quantity must be a multiple of group_size
                         //
-                        // We can't use a constraint like "replica_var % group_size == 0" because
+                        // We can't use a constraint like "quantity_var % group_size == 0" because
                         // modulo operations are not linear and can't be directly expressed in LP.
                         // Instead, we use this auxiliary variable approach which accomplishes the
                         // same mathematical requirement.
                         m2.with(constraint!(
-                            replica_var == complete_groups_var * (group_size as f32)
+                            quantity_var == complete_groups_var * (group_size as f32)
                         ))
                     } else {
                         m2
@@ -360,12 +360,12 @@ fn create_item_assignments(
     solution: &impl LpSolution,
     items: &BTreeMap<String, ItemSpec>,
     bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> BTreeMap<String, BTreeMap<String, u32>> {
     items
         .keys()
         .filter_map(|item| {
-            let bin_assignments = get_bin_assignments(solution, item, bins, replicas_map);
+            let bin_assignments = get_bin_assignments(solution, item, bins, quantity_map);
 
             // Only include items that have at least one assignment
             (!bin_assignments.is_empty()).then_some((item.clone(), bin_assignments))
@@ -373,21 +373,21 @@ fn create_item_assignments(
         .collect()
 }
 
-/// Get the replica assignments for a item across all bins
+/// Get the quantity assignments for an item across all bins
 fn get_bin_assignments(
     solution: &impl LpSolution,
     item: &str,
     bins: &BTreeMap<String, u32>,
-    replicas_map: &BinItemToVariableMap,
+    quantity_map: &BinItemToVariableMap,
 ) -> BTreeMap<String, u32> {
     bins.keys()
         .filter_map(|bin| {
             let key = (item.to_string(), bin.clone());
-            let replica_count = solution.value(replicas_map[&key]).round() as u32;
+            let quantity = solution.value(quantity_map[&key]).round() as u32;
             let bin = key.1;
 
-            // Only include bins with at least one replica
-            (replica_count > 0).then_some((bin, replica_count))
+            // Only include bins with at least one item
+            (quantity > 0).then_some((bin, quantity))
         })
         .collect()
 }
