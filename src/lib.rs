@@ -6,7 +6,7 @@ use good_lp::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Problem {
     pub items: BTreeMap<String, ItemSpec>,
     pub bins: BTreeMap<String, u32>,
@@ -17,7 +17,7 @@ pub struct Solution {
     pub solution: BTreeMap<String, BTreeMap<String, u32>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ItemSpec {
     pub quantity: u32,
     #[serde(rename = "groupSize")]
@@ -27,19 +27,19 @@ pub struct ItemSpec {
     pub anti_affinity: Option<AntiAffinity>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Affinity {
     pub soft: Option<Vec<SoftRequirement>>,
     pub hard: Option<HardRequirement>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AntiAffinity {
     pub soft: Option<Vec<SoftRequirement>>,
     pub hard: Option<HardRequirement>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SoftRequirement {
     #[serde(default = "default_weight")]
     pub weight: f64,
@@ -49,7 +49,7 @@ fn default_weight() -> f64 {
     1.0
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct HardRequirement {
     pub bins: Vec<String>,
 }
