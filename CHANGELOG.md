@@ -24,10 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - More renaming
 - Refactor to only print coin_cbc output when debug_assertions are on
 - More readability improvements
-- Rename cluster/workload to bin/item
+- Rename to bin/item
 - Readability refactor
 - Make solve a method
 - Rename Input/Output Problem/Solution
 - Split into main.rs and lib.rs
 - Remove microlp feature because it is unused
-- First commit after moving contents from rust-playground/cluster-binpacking
+- First commit
