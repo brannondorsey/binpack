@@ -43,6 +43,7 @@ jobs:
         with:
           packages: coinor-cbc coinor-libcbc-dev
           version: 1.0 # an arbitrary cache key
+          execute_install_scripts: true
 
       - name: Install CBC dependencies (macOS)
         if: matrix.os == 'macos-latest'
