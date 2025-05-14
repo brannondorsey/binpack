@@ -1,3 +1,53 @@
+//! A crate for solving binpacking problems using Linear Programming.
+//!
+//! # Example
+//! ```rust
+//! use binpack::Problem;
+//!
+//! const PROBLEM: &str = r#"
+//! bins:
+//!   b1: 100
+//!   b2: 40
+//!   b3: 10
+//!
+//! items:
+//!   i1:
+//!     quantity: 30
+//!     affinity:
+//!       soft:
+//!         - weight: 1
+//!           bins: [b1]
+//!     antiAffinity:
+//!       hard:
+//!         bins: [b3]
+//!   i2:
+//!     quantity: 110
+//!     affinity:
+//!       soft:
+//!         - weight: 2
+//!           bins: [b1]
+//!   i3:
+//!     quantity: 10
+//! "#;
+//!
+//!
+//! const SOLUTION: &str = r#"
+//! solution:
+//!   i1:
+//!     b2: 30
+//!   i2:
+//!     b1: 100
+//!     b3: 10
+//!   i3:
+//!     b2: 10
+//! "#;
+//!
+//! let problem: Problem = serde_yaml::from_str(PROBLEM).unwrap();
+//! let solution = problem.solve().unwrap();
+//! assert_eq!(serde_yaml::to_string(&solution).unwrap().trim(), SOLUTION.trim());
+//!
+//! ```
+
 use good_lp::Solution as LpSolution;
 use good_lp::solvers::coin_cbc::coin_cbc;
 use good_lp::{
@@ -7,39 +57,61 @@ pub use serde; // Re-export because we use it in the public API
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// A bin packing problem to solve
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Problem {
+    /// A map of item names to their specifications
     pub items: BTreeMap<String, ItemSpec>,
+    /// A map of bin names to their capacities
     pub bins: BTreeMap<String, u32>,
 }
 
+/// A solution to a bin packing problem
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Solution {
+    /// A map of item names to their bin assignments
     pub solution: BTreeMap<String, BTreeMap<String, u32>>,
 }
 
+/// Details about how an item should be packed
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ItemSpec {
+    /// The number of items that need to be packed
     pub quantity: u32,
     #[serde(rename = "groupSize")]
+    /// A size that items must always be grouped to when packed together. Bin assignments of this item will always be modulo this size.
     pub group_size: Option<u32>,
+    /// An set of affinities that will result in asignments towards specific bins
     pub affinity: Option<Affinity>,
+    /// An set of anti-affinities that will result in asignments away from specific bins
     #[serde(rename = "antiAffinity")]
     pub anti_affinity: Option<AntiAffinity>,
 }
 
+/// Required and preferred bin assignments for an item
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Affinity {
+    /// An list of soft requirements (preferences) for the item
     pub soft: Option<Vec<SoftRequirement>>,
+    /// A list of hard requirements for the item
     pub hard: Option<HardRequirement>,
 }
 
+/// Required and preferred bin aversions for an item
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AntiAffinity {
     pub soft: Option<Vec<SoftRequirement>>,
     pub hard: Option<HardRequirement>,
 }
 
+/// A hard requirement for an item to be packed into a set of bins
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct HardRequirement {
+    /// A list of bins that the item must be packed into
+    pub bins: Vec<String>,
+}
+
+/// A soft requirement (preference) for an item to be packed to a set of bins
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SoftRequirement {
     #[serde(default = "default_weight")]
@@ -50,14 +122,14 @@ fn default_weight() -> f64 {
     1.0
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct HardRequirement {
-    pub bins: Vec<String>,
-}
-
 // TODO: Manually validate quantities are multiples of group sizes
 //       We could have a series of simple_validations()
 impl Problem {
+    /// Solve the problem and return a solution
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the problem is invalid or the solver fails to find a solution.
     pub fn solve(&self) -> Result<Solution, Box<dyn std::error::Error>> {
         let items = &self.items;
         let bins = &self.bins;
