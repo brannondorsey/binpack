@@ -23,6 +23,8 @@ jobs:
           fetch-depth: 0
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Install CBC dependencies (Ubuntu)
+        run: sudo apt-get install -y coinor-cbc coinor-libcbc-dev
       - name: Run release-plz
         uses: release-plz/action@7419a2cb1535b9c0e852b4dec626967baf65c022 # v0.5.102
         with:
