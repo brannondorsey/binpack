@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/brannondorsey/binpack/compare/v0.1.0...v0.1.1) - 2025-05-14
+
+### Other
+
+- Revert "fix: Try release always"
+
 ## [0.1.0](https://github.com/brannondorsey/binpack/releases/tag/v0.1.0) - 2025-05-14
 
 ### Added
