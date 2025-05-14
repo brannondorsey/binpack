@@ -7,7 +7,7 @@ authors = ["Brannon Dorsey <brannon@brannondorsey.com>"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/brannondorsey/binpack"
-keywords = ["binpacking", "linear programming"]
+keywords = ["binpacking", "binpack", "linear-programming"]
 categories = ["mathematics", "algorithms"]
 exclude = [".github/*"]
 
