@@ -37,6 +37,16 @@ jobs:
           # time goes on. Feel free to bump.
           tool: cargo-hack@0.6
 
+      - name: Install CBC dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y coinor-cbc coinor-libcbc-dev
+
+      - name: Install CBC dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install cbc
+
       - name: Remove Cargo.lock
         # Because this is a library crate, it is best to not use a lockfile so
         # we are more quickly alerted to breaking changes if a dependency
