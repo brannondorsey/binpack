@@ -37,13 +37,10 @@ jobs:
           # time goes on. Feel free to bump.
           tool: cargo-hack@0.6
 
-      - uses: awalsh128/cache-apt-pkgs-action@5902b33ae29014e6ca012c5d8025d4346556bd40 # v1.4.3
-        name: Install CBC dependencies (Ubuntu)
+      - name: Install CBC dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        with:
-          packages: coinor-cbc coinor-libcbc-dev
-          version: 1.1 # an arbitrary cache key
-          execute_install_scripts: true
+        run: |
+          sudo apt-get install -y coinor-cbc coinor-libcbc-dev
 
       - name: Install CBC dependencies (macOS)
         if: matrix.os == 'macos-latest'
