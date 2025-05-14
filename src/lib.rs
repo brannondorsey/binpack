@@ -53,7 +53,8 @@ use good_lp::solvers::coin_cbc::coin_cbc;
 use good_lp::{
     Expression, ProblemVariables, SolverModel, Variable, constraint, variable, variables,
 };
-pub use serde; // Re-export because we use it in the public API
+/// Re-exports the serde crate with the version that's used to serialize and deserialize [`Problem`] and [`Solution`]
+pub use serde;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
